@@ -4,45 +4,64 @@ from .iterators import FileIterator, DirIterator, DirIterator, FileLineIterator,
     TokenizedSequenceIterator, TokenIterator, IteratorChain, \
     SlidingWindowIterator
 from .tokenization import DEFAULT_TOKENIZER, DEFAULT_SENT_TOKENIZER
-from vecto.utils.metadata import WithMetaData
 
 
 logger = logging.getLogger(__name__)
 
 
-class Corpus(WithMetaData):
-    """Cepresents a body of text in single or multiple files"""
+class CorpusBuilder(object):
+    def __init__(self):
+        self.result = None
 
-    def __init__(self, path):
-        self.path = path
+    def from_file(self, path):
+        assert self.result is None, 'from_file or from_dir must be the first modifier'
+        self.result = FileIterator(path)
+        return self
 
-    def get_sliding_window_iterator(self, left_ctx_size=2, right_ctx_size=2, tokenizer=DEFAULT_TOKENIZER, verbose=0):
-        return SlidingWindowIterator(
-            self.get_sentence_iterator(tokenizer=tokenizer),
-            left_ctx_size=left_ctx_size,
-            right_ctx_size=right_ctx_size)
+    def from_dir(self, path):
+        assert self.result is None, 'from_file or from_dir must be the first modifier'
+        self.result = DirIterator(path)
+        return self
 
-    def get_token_iterator(self, tokenizer=DEFAULT_TOKENIZER, verbose=False):
-        return TokenIterator(self.get_sentence_iterator(tokenizer, verbose))
+    def by_line(self):
+        self.result = FileLineIterator(self.result)
+        return self
 
-    def get_sentence_iterator(self, tokenizer=DEFAULT_SENT_TOKENIZER, verbose=False):
-        return TokenizedSequenceIterator(self.get_line_iterator(), tokenizer=tokenizer)
+    def split(self, tokenizer=DEFAULT_TOKENIZER):
+        self.result = TokenizedSequenceIterator(self.result, tokenizer=tokenizer)
+        return self
+
+    def to_tokens(self):
+        self.result = TokenIterator(self.result)
+        return self
+
+    def sliding_window(self, left_ctx_size=2, right_ctx_size=2):
+        self.result = SlidingWindowIterator(self.result,
+                                            left_ctx_size=left_ctx_size,
+                                            right_ctx_size=right_ctx_size)
+        return self
+
+    def append(self, other):
+        self.result = corpus_chain(self.result, other)
+        return self
+
+    def build(self):
+        # validate iterators compatibility if we feel paranoid
+        assert self.result is not None
+        try:
+            next(iter(self.result))
+        except Exception as ex:
+            raise Exception('You have built invalid corpus reader!', ex)
+        return self.result
 
 
-class FileCorpus(Corpus):
-    """Cepresents a body of text in a single file"""
+# this is compact enough to not have shortcuts at all
+example_file_token_corpus = CorpusBuilder().from_file('12312312').by_line().split().to_tokens().build()
+example_file_sentence_corpus = CorpusBuilder().from_file('12312312').by_line().split().build()
+example_dir_sliding_window_corpus = CorpusBuilder().from_dir('12312312').by_line().split().to_tokens().sliding_window().build()
 
-    def get_line_iterator(self, verbose=False):
-        return FileLineIterator(FileIterator(self.path, verbose=verbose))
 
-
-class DirCorpus(Corpus):
-    """Cepresents a body of text in a directory"""
-
-    def get_line_iterator(self, verbose=False):
-        return FileLineIterator(DirIterator(self.path, verbose=verbose))
-
-# old code below ----------------------------------
+# ********************** old code *******************************
 
 
 def FileSentenceCorpus(path, tokenizer=DEFAULT_SENT_TOKENIZER, verbose=0):
@@ -54,6 +73,7 @@ def FileSentenceCorpus(path, tokenizer=DEFAULT_SENT_TOKENIZER, verbose=0):
     :param verbose: whether to enable progressbar or not
     :return:
     """
+    return CorpusBuilder().from_file(path).
     return TokenizedSequenceIterator(
         FileLineIterator(
             FileIterator(path, verbose=verbose)),
